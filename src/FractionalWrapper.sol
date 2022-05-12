@@ -57,13 +57,12 @@ contract FractionalWrapper is ERC20Mock, Ownable {
     }
 
 
-    /// @notice User burns wrapped tokens, receiving underlying tokens; based on the exchange rate.
-    /// @dev Burns shares from owner and sends exactly assets of underlying tokens to receiver
+    /// @dev Burns shares from owner and sends exactly assets of underlying tokens to receiver; based on the exchange rate.
     /// @param assets The amount of underlying tokens to withdraw
     /// @param receiver Address of receiver of underlying tokens - DAI
     /// @param owner Address of owner of Fractional Wrapper shares - yvDAI
     function withdraw(uint assets, address receiver, address owner) external returns(uint shares) {
-        shares = convertToAssets(assets);
+        shares = convertToShares(assets);
         
         // MUST support a withdraw flow where the shares are burned from owner directly where owner is msg.sender,
         // OR msg.sender has ERC-20 approval over the shares of owner
@@ -72,45 +71,74 @@ contract FractionalWrapper is ERC20Mock, Ownable {
             require(allowedShares >= shares, "Allowance exceeded!");
             _allowance[owner][receiver] = allowedShares - shares;
         }
-        
-        //burn yvDAI 
+
+        //burn wrapped tokens(shares) -> yvDAI 
         burn(owner, shares);
         
         //transfer assets
         bool success = asset.transfer(receiver, assets);
         require(success, "Transfer failed!"); 
+        emit Withdraw(msg.sender, receiver, owner, assets, shares);
+    }
 
+    /// @dev Burns shares from owner and sends assets of underlying tokens to receiver; based on the exchange rate.
+    /// @param shares The amount of wrapped tokens to redeem for underlying tokens (assets)
+    /// @param receiver Address of receiver of underlying tokens - DAI
+    /// @param owner Address of owner of Fractional Wrapper shares - yvDAI
+    function redeem(uint shares, address receiver, address owner) external returns(uint assets) {
+        assets = convertToAssets(shares);
+        
+        // MUST support a redeem flow where the shares are burned from owner directly where owner is msg.sender,
+        // OR msg.sender has ERC-20 approval over the shares of owner
+        if(msg.sender != owner){
+            uint allowedShares = _allowance[owner][receiver] ;
+            require(allowedShares >= shares, "Allowance exceeded!");
+            _allowance[owner][receiver] = allowedShares - shares;
+        }
+
+        //burn wrapped tokens(shares) -> yvDAI 
+        burn(owner, shares);
+        
+        //transfer assets
+        bool success = asset.transfer(receiver, assets);
+        require(success, "Transfer failed!"); 
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
     }
 
 
-    ///@dev set exchange rate 
-    function setExchangeRate(uint exRate_) public onlyOwner {
+
+    /// @notice Only the owner can call to modify exchange rate
+    /// @dev Exchange rate is of 1e27 precision | Ex-rate: 1 DAI/yvDAI = 0.5 -> 1 DAI gets you 1/2 yvDAI
+    /// @param exRate_ New exchange rate
+    function setExchangeRate(uint exRate_) external onlyOwner {
         exRate = exRate_;
     }
 
-    ///@notice calculate how much yvDAI user should get based on exchange rate
-    ///@dev exRate(27 dp precision) | both assets and shares are 18 dp precision
-    ///Note: Apply division at the end as it results in the removal of 'decimal 0's
+    /// @notice calculate how much yvDAI user should get based on exchange rate
+    /// @dev exRate(27 dp precision) | both assets and shares are 18 dp precision
+    /// @param assets Amount of underlying tokens (assets) to be converted to wrapped tokens (shares)
+    /// Note: Apply division at the end as it results in the removal of 'decimal 0's
     function convertToShares(uint assets) public view returns(uint shares){
         return (assets * exRate) / 1e27;
     }
 
-    ///@notice calculate how much DAI user should get based on exchange rate
-    ///@dev exRate(27 dp precision) | both assets and shares are 18 dp precision
-    ///Note: Apply division at the end as it results in the removal of 'decimal 0's
+    /// @notice calculate how much DAI user should get based on exchange rate
+    /// @dev exRate(27 dp precision) | both assets and shares are 18 dp precision
+    /// @param shares Amount of wrapped tokens (shares)to be converted to underlying tokens (assets) 
+    /// Note: Apply division at the end as it results in the removal of 'decimal 0's
     function convertToAssets(uint shares) public view returns(uint assets){
         return (shares * 1e27) / exRate;
     }
     
-    //Note that any unfavorable discrepancy between convertToShares and previewDeposit SHOULD be considered slippage in share price
+    /// Note that any unfavorable discrepancy between convertToShares and previewDeposit SHOULD be considered slippage in share price
     function previewDeposit(uint assets) public view returns(uint shares) {
         return convertToShares(assets);
     }
 
-    //Note that any unfavorable discrepancy between convertToShares and previewWithdraw SHOULD be considered slippage in share price
+    /// Note that any unfavorable discrepancy between convertToShares and previewWithdraw SHOULD be considered slippage in share price
     function previewWithdraw(uint assets) public view returns(uint shares) {
         return convertToShares(assets);
     }
+    
 
 }

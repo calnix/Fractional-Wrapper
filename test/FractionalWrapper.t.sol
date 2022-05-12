@@ -6,6 +6,7 @@ import "lib/forge-std/src/console2.sol";
 
 import "src/FractionalWrapper.sol";
 import "src/DAIToken.sol";
+using stdStorage for StdStorage;
 
 
 abstract contract StateZero is Test {
@@ -50,9 +51,9 @@ abstract contract StateZero is Test {
 contract StateZeroTest is StateZero {
     //cannot withdraw. cannot change exrate. can deposit
     
-    //Note: User interacts directly with Wrapper in this scenario; no intermediary parties.
-    //  deploy: user is both caller and receiver
-    //  withdraw: user is both the owner and receiver
+    // Note: User interacts directly with Wrapper in this scenario; no intermediary parties.
+    // deploy: user is both caller and receiver
+    // withdraw: user is both the owner and receiver
 
     function testCannotWithdraw(uint amount) public {
         console2.log("User should be unable to withdraw without any deposits made");
@@ -60,6 +61,14 @@ contract StateZeroTest is StateZero {
         vm.expectRevert("ERC20: Insufficient balance");
         vm.prank(user);
         wrapper.withdraw(amount, user, user);
+    }
+
+    function testCannotRedeem(uint amount) public {
+        console2.log("User should be unable to redeem without any deposits made");
+        vm.assume(amount > 0 && amount < dai.balanceOf(user));
+        vm.expectRevert("ERC20: Insufficient balance");
+        vm.prank(user);
+        wrapper.redeem(amount, user, user);
     }
   
     function testUserCannotChangeRate() public {
@@ -103,6 +112,14 @@ contract StateDepositedTest is StateDeposited {
         wrapper.withdraw(userTokens, user, user);
     }
 
+    function testCannotRedeemInExcess() public {
+        console2.log("User cannot redeem in excess of what was deposited - burn() will revert");
+        vm.prank(user);
+        vm.expectRevert("ERC20: Insufficient balance");
+        // since ex_rate = 1 -> qty of userTokens as shares = qty of userTokens | trivial conversion
+        wrapper.redeem(userTokens, user, user);
+    }
+
     function testWithdraw() public {
         console2.log("User withdraws his deposit");
         uint shares = wrapper.convertToShares(userTokens/2);
@@ -112,6 +129,22 @@ contract StateDepositedTest is StateDeposited {
         
         vm.prank(user);
         wrapper.withdraw(userTokens/2, user, user);
+
+        assertTrue(wrapper.balanceOf(user) == 0);
+        assertTrue(dai.balanceOf(user) == userTokens);
+    }
+
+    function testRedeem() public {
+        console2.log("User redeems his shares, for his deposit");
+        // since ex_rate = 1 -> qty of userTokens as shares = qty of userTokens | trivial conversion
+        // meaning: assets == userTokens/2 == shares
+        uint assets = wrapper.convertToAssets(userTokens/2);
+
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, user, user, assets, userTokens/2);
+        
+        vm.prank(user);
+        wrapper.redeem(assets, user, user);
 
         assertTrue(wrapper.balanceOf(user) == 0);
         assertTrue(dai.balanceOf(user) == userTokens);
@@ -131,24 +164,74 @@ abstract contract StateRateChanges is StateDeposited {
 
 contract StateRateChangesTest is StateRateChanges {
     
-    function testCannotWithdrawSameAmount() public {
-        console2.log("Rate depreciates: User's shares are redeemable for less than original deposit");
-        console2.log("1 yvDAI is redeemable for more DAI");
+    // Regardless withdraw or redeem the same proportionality changes to wrapped and underlying tokens apply due to ex_rate changes
+    function testCannotWithdrawOrRedeemSameAmount() public {
+        console2.log("Rate depreciates: User's shares are convertible for more than original deposit sum");
+        console2.log("1 yvDAI is convertible for 2 DAI");
         
         //Note: if proceed to actually withdraw from wrapper, "ERC20: Insufficient balance", as wrapper does not have additional DAI to payout. 
         uint assets = wrapper.convertToAssets(wrapper.balanceOf(user));
         assertTrue(assets > userTokens/2);
+        assertTrue(assets == userTokens);
     }
     
     function testCannotDepositSameAmount() public {
-        console2.log("Rate depreciates: User's deposit returns fewer shares than before");
-        console2.log("1 DAI deposit gets you lesser yvDAI");
+        console2.log("Rate depreciates: User's second deposit converts to fewer shares than before");
+        console2.log("1 DAI is convertible for 1/2 yvDAI");
 
         vm.prank(user);
         wrapper.deposit(userTokens/2, user);
 
         assertTrue(dai.balanceOf(user) == 0);
         assertTrue(wrapper.balanceOf(user) < userTokens);
+        
+        // initial deposit of userTokens/2 @ ex_rate = 1 -> wrapper.balanceOf(user) == userTokens/2
+        // second deposit iof userTokens/2 @ ex_rate = 0.5 ->  wrapper.balanceOf(user) == userTokens/4
+        assertTrue(wrapper.balanceOf(user) == userTokens/2 + userTokens/4);
+    }
+
+    function testWithdrawRateChange() public {
+        console2.log("Rate depreciates: User withdraws his deposit of userTokens/2 | will have remainder shares");
+        
+        // initialShares == userTokens/2
+        uint initialShares = wrapper.balanceOf(user);
+        uint sharesWithdrawn = wrapper.convertToShares(userTokens/2);
+
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, user, user, userTokens/2, sharesWithdrawn);
+        
+        vm.prank(user);
+        wrapper.withdraw(userTokens/2, user, user);
+
+        assertTrue(wrapper.balanceOf(user) == initialShares - sharesWithdrawn);
+        assertTrue(dai.balanceOf(user) == userTokens);
+    }
+    
+
+    function testRedeemRateChange() public {
+        console2.log("Rate depreciates: User redeems userTokens/2 worth of SHARES | will gain ASSETS of a larger quantity");
+        console2.log("1 DAI is convertible for 1/2 yvDAI");
+
+        // user withdraws userTokens/2 of worth of shares
+        // @ new rate, share should be equivalent to userTokens due to depreciation
+        uint assets = wrapper.convertToAssets(userTokens/2);
+        assertTrue(assets == userTokens);
+
+        // inject extra DAI into Wrapper to simulate payout
+        stdstore    
+        .target(address(dai))
+        .sig(dai.balanceOf.selector)         //select balanceOf mapping
+        .with_key(address(wrapper))         //set mapping key balanceOf(address(vault))
+        .checked_write(10000*10**18);      //data to be written to the storage slot -> balanceOf(address(vault)) = 10000*10**18
+
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, user, user, assets, userTokens/2);
+        
+        vm.prank(user);
+        wrapper.redeem(userTokens/2, user, user);
+
+        assertTrue(wrapper.balanceOf(user) == 0);
+        assertTrue(dai.balanceOf(user) == userTokens + userTokens/2);
     }
 
 }
