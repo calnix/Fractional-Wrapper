@@ -81,7 +81,7 @@ At any point, a holder of Wrapper tokens can burn them to recover an amount of u
 2. Fwrapper - "vault w/ ex_rate" 
 
 Both contracts are ERC20Mock, to issue tokens. 
-Fwrapper must confirm to ERC4626 specification.
+Fwrapper must conform to ERC4626 specification.
 - implementation of convert* and preview* will be identical in this case (no need to calculate some time-weighted average for convert*).
 
 

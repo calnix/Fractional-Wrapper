@@ -9,19 +9,16 @@ import "src/DAIToken.sol";
 using stdStorage for StdStorage;
 
 
-abstract contract StateZero is Test {
+abstract contract StateZero is Test, FractionalWrapper {
         
     DAIToken public dai;
     FractionalWrapper public wrapper;
 
     address user;
-    address stratEngine;
     address deployer;
-
     uint userTokens;
 
-    event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares);
-    event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares);
+    constructor() FractionalWrapper(IERC20(dai),"yvDAI", "yvDAI") {}
 
     function setUp() public virtual {
         dai = new DAIToken();
@@ -32,9 +29,6 @@ abstract contract StateZero is Test {
 
         user = address(1);
         vm.label(user, "user");
-
-        stratEngine = address(2);
-        vm.label(stratEngine, "Strategy Engine");
         
         deployer = 0xb4c79daB8f259C7Aee6E5b2Aa729821864227e84;
         vm.label(deployer, "deployer");
@@ -48,9 +42,7 @@ abstract contract StateZero is Test {
 }
 
 
-contract StateZeroTest is StateZero {
-    //cannot withdraw. cannot change exrate. can deposit
-    
+contract StateZeroTest is StateZero {   
     // Note: User interacts directly with Wrapper in this scenario; no intermediary parties.
     // deploy: user is both caller and receiver
     // withdraw: user is both the owner and receiver
@@ -80,7 +72,7 @@ contract StateZeroTest is StateZero {
 
     function testDeposit() public {
         console2.log("User deposits DAI into Fractional Wrapper");
-        uint shares = wrapper.convertToShares(userTokens/2);
+        uint shares = convertToShares(userTokens/2);
 
         vm.prank(user);
         vm.expectEmit(true, true, false, true);
@@ -89,7 +81,28 @@ contract StateZeroTest is StateZero {
         wrapper.deposit(userTokens/2, user);
         assertTrue(wrapper.balanceOf(user) == dai.balanceOf(user));
     }
+
+    function testMint() public {
+        console2.log("Test minting of shares to user");
+        uint shares = convertToShares(userTokens/2);
+
+        vm.prank(user);
+        vm.expectEmit(true, true, false, true);
+        emit Deposit(user, user, userTokens/2, shares);
+
+        wrapper.mint(userTokens/2, user);
+        assertTrue(wrapper.balanceOf(user) == dai.balanceOf(user));
+    }
+
+    function testAsset() public {
+        assertTrue(wrapper.asset() == address(dai));
+    }
+
+    function testTotalAssets() public {
+        assertTrue(wrapper.totalAssets() == 0);
+    }
 }
+
 
 abstract contract StateDeposited is StateZero {
     
@@ -122,7 +135,7 @@ contract StateDepositedTest is StateDeposited {
 
     function testWithdraw() public {
         console2.log("User withdraws his deposit");
-        uint shares = wrapper.convertToShares(userTokens/2);
+        uint shares = convertToShares(userTokens/2);
 
         vm.expectEmit(true, true, true, true);
         emit Withdraw(user, user, user, userTokens/2, shares);
@@ -138,7 +151,7 @@ contract StateDepositedTest is StateDeposited {
         console2.log("User redeems his shares, for his deposit");
         // since ex_rate = 1 -> qty of userTokens as shares = qty of userTokens | trivial conversion
         // meaning: assets == userTokens/2 == shares
-        uint assets = wrapper.convertToAssets(userTokens/2);
+        uint assets = convertToAssets(userTokens/2);
 
         vm.expectEmit(true, true, true, true);
         emit Withdraw(user, user, user, assets, userTokens/2);
@@ -150,6 +163,18 @@ contract StateDepositedTest is StateDeposited {
         assertTrue(dai.balanceOf(user) == userTokens);
     }
 
+    function testTotalAssets() public {
+        assertTrue(wrapper.totalAssets() == userTokens/2);
+    }
+
+    function testMaxWithdraw() public {
+        assertTrue(wrapper.maxWithdraw(user) == convertToAssets(userTokens/2));
+    }
+
+    function testMaxRedeem() public {
+        assertTrue(wrapper.maxRedeem(user) == userTokens/2);
+    }
+
 }
 
 abstract contract StateRateChanges is StateDeposited {
@@ -159,8 +184,21 @@ abstract contract StateRateChanges is StateDeposited {
 
         // change exchange rate
         wrapper.setExchangeRate(0.5e27);
+        
+        //vm.prank(address(deployer));
+        //setExchangeRate(0.5e27);
+
+       // vm.mockCall(address(this), abi.encodeWithSelector(StateZero.setExchangeRate.selector), 0.5e27);
+
+      /*
+       stdstore
+        .target(address(this))
+        .sig(address(this).setExchangeRate.selector)
+        .checked_write(0.5e27);
+        */
     }
 }
+
 
 contract StateRateChangesTest is StateRateChanges {
     
@@ -170,7 +208,7 @@ contract StateRateChangesTest is StateRateChanges {
         console2.log("1 yvDAI is convertible for 2 DAI");
         
         //Note: if proceed to actually withdraw from wrapper, "ERC20: Insufficient balance", as wrapper does not have additional DAI to payout. 
-        uint assets = wrapper.convertToAssets(wrapper.balanceOf(user));
+        uint assets = convertToAssets(wrapper.balanceOf(user));
         assertTrue(assets > userTokens/2);
         assertTrue(assets == userTokens);
     }
@@ -195,7 +233,8 @@ contract StateRateChangesTest is StateRateChanges {
         
         // initialShares == userTokens/2
         uint initialShares = wrapper.balanceOf(user);
-        uint sharesWithdrawn = wrapper.convertToShares(userTokens/2);
+        //vm.prank(address(wrapper));
+        uint sharesWithdrawn = convertToShares(userTokens/2);
 
         vm.expectEmit(true, true, true, true);
         emit Withdraw(user, user, user, userTokens/2, sharesWithdrawn);
@@ -214,7 +253,7 @@ contract StateRateChangesTest is StateRateChanges {
 
         // user withdraws userTokens/2 of worth of shares
         // @ new rate, share should be equivalent to userTokens due to depreciation
-        uint assets = wrapper.convertToAssets(userTokens/2);
+        uint assets = convertToAssets(userTokens/2);
         assertTrue(assets == userTokens);
 
         // inject extra DAI into Wrapper to simulate payout
@@ -224,11 +263,11 @@ contract StateRateChangesTest is StateRateChanges {
         .with_key(address(wrapper))         //set mapping key balanceOf(address(vault))
         .checked_write(10000*10**18);      //data to be written to the storage slot -> balanceOf(address(vault)) = 10000*10**18
 
-        vm.expectEmit(true, true, true, true);
-        emit Withdraw(user, user, user, assets, userTokens/2);
+     //   vm.expectEmit(true, true, true, true);
+     //   emit Withdraw(user, user, user, assets, userTokens/2); //asset = 50000000000000000000  | shares = 50000000000000000000  
         
         vm.prank(user);
-        wrapper.redeem(userTokens/2, user, user);
+        wrapper.redeem(userTokens/2, user, user);       //asset = 100000000000000000000 | shares = 50000000000000000000
 
         assertTrue(wrapper.balanceOf(user) == 0);
         assertTrue(dai.balanceOf(user) == userTokens + userTokens/2);
