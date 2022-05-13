@@ -208,7 +208,7 @@ contract StateRateChangesTest is StateRateChanges {
         console2.log("1 yvDAI is convertible for 2 DAI");
         
         //Note: if proceed to actually withdraw from wrapper, "ERC20: Insufficient balance", as wrapper does not have additional DAI to payout. 
-        uint assets = convertToAssets(wrapper.balanceOf(user));
+        uint assets = wrapper.convertToAssets(wrapper.balanceOf(user));
         assertTrue(assets > userTokens/2);
         assertTrue(assets == userTokens);
     }
@@ -233,8 +233,7 @@ contract StateRateChangesTest is StateRateChanges {
         
         // initialShares == userTokens/2
         uint initialShares = wrapper.balanceOf(user);
-        //vm.prank(address(wrapper));
-        uint sharesWithdrawn = convertToShares(userTokens/2);
+        uint sharesWithdrawn = wrapper.convertToShares(userTokens/2);
 
         vm.expectEmit(true, true, true, true);
         emit Withdraw(user, user, user, userTokens/2, sharesWithdrawn);
@@ -253,7 +252,7 @@ contract StateRateChangesTest is StateRateChanges {
 
         // user withdraws userTokens/2 of worth of shares
         // @ new rate, share should be equivalent to userTokens due to depreciation
-        uint assets = convertToAssets(userTokens/2);
+        uint assets = wrapper.convertToAssets(userTokens/2);
         assertTrue(assets == userTokens);
 
         // inject extra DAI into Wrapper to simulate payout
@@ -263,8 +262,8 @@ contract StateRateChangesTest is StateRateChanges {
         .with_key(address(wrapper))         //set mapping key balanceOf(address(vault))
         .checked_write(10000*10**18);      //data to be written to the storage slot -> balanceOf(address(vault)) = 10000*10**18
 
-     //   vm.expectEmit(true, true, true, true);
-     //   emit Withdraw(user, user, user, assets, userTokens/2); //asset = 50000000000000000000  | shares = 50000000000000000000  
+        vm.expectEmit(true, true, true, true);
+        emit Withdraw(user, user, user, assets, userTokens/2); //asset = 50000000000000000000  | shares = 50000000000000000000  
         
         vm.prank(user);
         wrapper.redeem(userTokens/2, user, user);       //asset = 100000000000000000000 | shares = 50000000000000000000

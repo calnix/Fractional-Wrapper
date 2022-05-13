@@ -119,7 +119,7 @@ contract FractionalWrapper is ERC20Mock, Ownable {
     /// @dev exRate(27 dp precision) | both assets and shares are 18 dp precision
     /// @param assets Amount of underlying tokens (assets) to be converted to wrapped tokens (shares)
     /// Note: Apply division at the end as it results in the removal of 'decimal 0's
-    function convertToShares(uint256 assets) internal view returns(uint256 shares){
+    function convertToShares(uint256 assets) public view returns(uint256 shares){
         return (assets * exRate) / 1e27;
     }
 
@@ -127,7 +127,7 @@ contract FractionalWrapper is ERC20Mock, Ownable {
     /// @dev exRate(27 dp precision) | both assets and shares are 18 dp precision
     /// @param shares Amount of wrapped tokens (shares)to be converted to underlying tokens (assets) 
     /// Note: Apply division at the end as it results in the removal of 'decimal 0's
-    function convertToAssets(uint256 shares) internal view returns(uint256 assets){
+    function convertToAssets(uint256 shares) public view returns(uint256 assets){
         return (shares * 1e27) / exRate;
     }
 
