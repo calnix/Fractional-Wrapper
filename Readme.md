@@ -1,4 +1,4 @@
-# New one
+# Updated problem statement
 Users can send a pre-specified erc-20 token (underlying) to an ERC20 contract(Fractional Wrapper).
 
 Fractional Wrapper contract issues a number of Wrapper tokens to the sender, equal to the deposit multiplied by a fractional number, called exchange rate.
